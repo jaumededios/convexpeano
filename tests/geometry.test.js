@@ -2,79 +2,72 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  blocksToSquares,
-  convexHull,
-  decomposeInterval,
-  hilbertIndexToXY,
-  squareCorners,
+  createPopulation,
+  createTargetPolygon,
+  isConvexPolygon,
+  pointInConvexPolygon,
+  polygonArea,
+  selectPopulationInterval,
 } from "../geometry.js";
 
-test("Hilbert coordinates visit every grid cell exactly once", () => {
-  for (let order = 1; order <= 6; order += 1) {
-    const total = 4 ** order;
-    const visited = new Set();
-    for (let index = 0; index < total; index += 1) {
-      const { x, y } = hilbertIndexToXY(order, index);
-      visited.add(`${x}:${y}`);
+const target = createTargetPolygon();
+
+test("the target and every population member are convex", () => {
+  assert.equal(isConvexPolygon(target), true);
+
+  for (const sliceCount of [8, 16, 32, 64, 128, 256]) {
+    const population = createPopulation({ target, sliceCount });
+    assert.equal(population.members.length, sliceCount * 2);
+    for (const slice of population.slices) {
+      assert.equal(isConvexPolygon(slice.growingNet), true);
+      assert.equal(isConvexPolygon(slice.shrinkingAntiNet), true);
+      assert.equal(isConvexPolygon(slice.body), true);
+      assert.ok(polygonArea(slice.body) > 0);
     }
-    assert.equal(visited.size, total);
   }
 });
 
-test("successive Hilbert coordinates share an edge", () => {
-  const order = 7;
-  for (let index = 1; index < 4 ** order; index += 1) {
-    const a = hilbertIndexToXY(order, index - 1);
-    const b = hilbertIndexToXY(order, index);
-    assert.equal(Math.abs(a.x - b.x) + Math.abs(a.y - b.y), 1);
-  }
-});
-
-test("interval decomposition is exact and base-4 aligned", () => {
-  const total = 4 ** 8;
-  const blocks = decomposeInterval(123, 52_019, total);
-  assert.equal(blocks[0].start, 123);
-  assert.equal(blocks.at(-1).start + blocks.at(-1).count, 52_019);
-  assert.equal(blocks.reduce((sum, block) => sum + block.count, 0), 52_019 - 123);
-
-  for (const block of blocks) {
-    assert.equal(block.start % block.count, 0);
-    assert.equal(Number.isInteger(Math.log(block.count) / Math.log(4)), true);
-  }
-});
-
-test("each recursive index block maps to one square", () => {
-  const order = 5;
-  const total = 4 ** order;
-  const blocks = decomposeInterval(17, total - 9, total);
-  const squares = blocksToSquares(order, blocks);
-
-  blocks.forEach((block, blockIndex) => {
-    const square = squares[blockIndex];
-    const side = 2 ** order;
-    const minX = square.x * side;
-    const minY = square.y * side;
-    const maxX = minX + square.size * side;
-    const maxY = minY + square.size * side;
-
-    for (let index = block.start; index < block.start + block.count; index += 1) {
-      const point = hilbertIndexToXY(order, index);
-      assert.ok(point.x >= minX && point.x < maxX);
-      assert.ok(point.y >= minY && point.y < maxY);
+test("every displayed interval body is intrinsically convex", () => {
+  const population = createPopulation({ target, sliceCount: 64 });
+  for (let start = 0; start <= 20; start += 1) {
+    for (let end = start; end <= 20; end += 1) {
+      const selection = selectPopulationInterval(population, start / 20, end / 20);
+      assert.equal(isConvexPolygon(selection.body), true);
+      assert.ok(polygonArea(selection.body) >= 0);
     }
-  });
+  }
 });
 
-test("convex hull wraps square blocks and drops interior points", () => {
-  const squares = [
-    { x: 0, y: 0, size: 0.5 },
-    { x: 0.5, y: 0, size: 0.5 },
-  ];
-  const hull = convexHull(squares.flatMap(squareCorners));
-  assert.deepEqual(hull, [
-    { x: 0, y: 0 },
-    { x: 1, y: 0 },
-    { x: 1, y: 0.5 },
-    { x: 0, y: 0.5 },
-  ]);
+test("the net/anti-net intersection equals the union of consecutive bodies", () => {
+  const sliceCount = 24;
+  const population = createPopulation({ target, sliceCount });
+  const memberCount = population.members.length;
+
+  for (const [firstSlice, lastSlice] of [[0, 0], [2, 7], [6, 18], [0, 23], [20, 23]]) {
+    const start = (firstSlice * 2) / memberCount;
+    const end = ((lastSlice + 1) * 2) / memberCount;
+    const selection = selectPopulationInterval(population, start, end);
+
+    for (let xIndex = 0; xIndex <= 60; xIndex += 1) {
+      for (let yIndex = 0; yIndex <= 60; yIndex += 1) {
+        const point = { x: xIndex / 60, y: yIndex / 60 };
+        if (!pointInConvexPolygon(point, target)) continue;
+        const inConsecutiveUnion = population.slices
+          .slice(firstSlice, lastSlice + 1)
+          .some((slice) => pointInConvexPolygon(point, slice.body));
+        const inConstructedBody = pointInConvexPolygon(point, selection.body);
+        assert.equal(inConstructedBody, inConsecutiveUnion);
+      }
+    }
+  }
+});
+
+test("growing an interval never decreases its body area", () => {
+  const population = createPopulation({ target, sliceCount: 96 });
+  let previousArea = 0;
+  for (let end = 0.2; end <= 1.0001; end += 0.02) {
+    const area = polygonArea(selectPopulationInterval(population, 0.2, Math.min(1, end)).body);
+    assert.ok(area + 1e-10 >= previousArea);
+    previousArea = area;
+  }
 });
