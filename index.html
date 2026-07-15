@@ -30,28 +30,27 @@
 
       <section class="visualization" aria-label="Convex Peano curve visualization">
         <div class="canvas-wrap">
-          <canvas id="peano-canvas" aria-label="An ordered population of convex bodies"></canvas>
-          <canvas id="overlay-canvas" aria-hidden="true"></canvas>
+          <canvas id="peano-canvas" aria-label="A polygonal approximation of the convex Peano curve"></canvas>
         </div>
 
         <div class="controls">
           <div class="control">
             <div class="control-label">
               <label for="interval-start">Interval</label>
-              <output id="interval-output">[0.333, 0.667]</output>
+              <output id="interval-output">[0.000, 1.000]</output>
             </div>
             <div class="dual-range">
               <div class="rail"></div>
               <div class="range-fill" id="range-fill"></div>
-              <input id="interval-start" type="range" min="0" max="1000" value="333" step="1" aria-label="Interval start" />
-              <input id="interval-end" type="range" min="0" max="1000" value="667" step="1" aria-label="Interval end" />
+              <input id="interval-start" type="range" min="0" max="1000" value="0" step="1" aria-label="Interval start" />
+              <input id="interval-end" type="range" min="0" max="1000" value="1000" step="1" aria-label="Interval end" />
             </div>
           </div>
 
           <div class="control">
             <div class="control-label">
               <label for="resolution">Resolution</label>
-              <output id="resolution-output">20,160 bodies</output>
+              <output id="resolution-output">24,360 segments</output>
             </div>
             <input id="resolution" class="single-range" type="range" min="0" max="5" value="4" step="1" />
           </div>

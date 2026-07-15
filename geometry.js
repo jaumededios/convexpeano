@@ -267,6 +267,12 @@ function localizedNet(parent, axis, detail, overlap, tileSize, curvatureScale) {
     value + overlap,
     curvature,
   ));
+  const firstValid = coarse.find((body) => body.length >= 3 && polygonArea(body) > EPSILON)
+    || parent;
+  for (let index = 0; index < coarse.length; index += 1) {
+    if (coarse[index].length >= 3 && polygonArea(coarse[index]) > EPSILON) continue;
+    coarse[index] = index > 0 ? coarse[index - 1] : firstValid;
+  }
   coarse[coarse.length - 1] = parent;
 
   const bodies = [coarse[0]];
@@ -342,15 +348,25 @@ function makeSouls(entries) {
     let adjacent = entry.body;
     if (index % 2 === 0 && index > 0) adjacent = entries[index - 1].body;
     if (index % 2 === 1 && index + 1 < entries.length) adjacent = entries[index + 1].body;
+    const intersection = intersectConvexPolygons(entry.body, adjacent);
     return {
       ...entry,
       index,
-      core: intersectConvexPolygons(entry.body, adjacent),
+      core: intersection.length >= 3 && polygonArea(intersection) > EPSILON
+        ? intersection
+        : entry.body,
     };
   });
 }
 
-function createOffspring(parent, axis, detail, overlap, tileSize, curvatureScale) {
+function createOffspring(
+  parent,
+  axis,
+  detail,
+  overlap,
+  tileSize,
+  curvatureScale,
+) {
   const net = localizedNet(parent.core, axis, detail, overlap, tileSize, curvatureScale);
   const antiNet = localizedAntiNet(
     parent.body,
@@ -411,15 +427,38 @@ function createOffspring(parent, axis, detail, overlap, tileSize, curvatureScale
   return cells.flatMap((body) => [{ body }, { body }]);
 }
 
-function refinePopulation(parents, axis, detail, overlap, tileSize, curvatureScale) {
-  const groups = parents.map((parent) => createOffspring(
-    parent,
-    axis,
-    detail,
-    overlap,
-    tileSize,
-    curvatureScale,
-  ));
+function refinePopulation(
+  parents,
+  axis,
+  detail,
+  overlapScale,
+  tileScale,
+  curvatureScale,
+) {
+  const groups = parents.map((parent) => {
+    const bounds = polygonBounds(parent.body);
+    const axisSpan = Math.max(
+      EPSILON,
+      axisMaximum(bounds, axis) - axisMinimum(bounds, axis),
+    );
+    const span = Math.max(bounds.xMax - bounds.xMin, bounds.yMax - bounds.yMin);
+    const overlap = Math.min(
+      axisSpan * 0.5,
+      (axisSpan / Math.max(1, detail - 1)) * overlapScale,
+    );
+    const tileSize = Math.max(
+      (span / Math.max(1, detail - 1)) * tileScale,
+      span * 0.08,
+    );
+    return createOffspring(
+      parent,
+      axis,
+      detail,
+      overlap,
+      tileSize,
+      curvatureScale,
+    );
+  });
   const childCount = Math.max(...groups.map(({ length }) => length));
   const entries = [];
   groups.forEach((group, parentIndex) => {
@@ -476,6 +515,7 @@ export function createNestedPopulation({
   overlapScale = 2.2,
   tileScale = 4,
   curvatureScale = 0.52,
+  includeHullIndex = true,
 }) {
   const bounds = polygonBounds(target);
   const span = Math.max(bounds.xMax - bounds.xMin, bounds.yMax - bounds.yMin);
@@ -496,24 +536,23 @@ export function createNestedPopulation({
     parents,
     1,
     resolution,
-    overlap,
-    tileSize,
+    overlapScale,
+    tileScale,
     curvatureScale,
   );
   const atoms = refinement.children.map((atom) => ({
     ...atom,
     center: polygonCentroid(atom.body),
   }));
-  const levels = [parents, atoms];
 
   return {
     target,
     resolution,
     branchCount: refinement.childCount,
     parents,
-    levels,
+    levels: [parents, atoms],
     atoms,
-    hullIndex: buildHullIndex(atoms.map(({ body }) => body)),
+    hullIndex: includeHullIndex ? buildHullIndex(atoms.map(({ body }) => body)) : null,
   };
 }
 
@@ -533,6 +572,37 @@ export function selectPopulationInterval(population, start, end) {
     firstAtom: population.atoms[first],
     lastAtom: population.atoms[last],
   };
+}
+
+/**
+ * A continuous polygonal approximant through the centers of the ordered
+ * bodies. Each edge stays in the convex union of its two consecutive bodies.
+ */
+export function createPopulationCurve(population) {
+  if (population.curve) return population.curve;
+  const { atoms } = population;
+  if (!atoms.length) return [];
+  const curve = atoms.map((atom) => atom.center || polygonCentroid(atom.body));
+  population.curve = curve;
+  return curve;
+}
+
+export function selectPopulationCurve(population, start, end) {
+  const curve = createPopulationCurve(population);
+  const segmentCount = curve.length - 1;
+  if (segmentCount <= 0) return curve;
+  const lower = Math.min(start, end) * segmentCount;
+  const upper = Math.max(start, end) * segmentCount;
+  const first = Math.min(segmentCount - 1, Math.floor(lower));
+  const last = Math.min(segmentCount - 1, Math.floor(upper));
+  const interpolate = (index, amount) => ({
+    x: curve[index].x + (curve[index + 1].x - curve[index].x) * amount,
+    y: curve[index].y + (curve[index + 1].y - curve[index].y) * amount,
+  });
+  const selected = [interpolate(first, lower - first)];
+  for (let index = first + 1; index <= last; index += 1) selected.push(curve[index]);
+  if (upper > lower) selected.push(interpolate(last, upper - last));
+  return selected;
 }
 
 export function maxPolygonDiameter(polygons) {

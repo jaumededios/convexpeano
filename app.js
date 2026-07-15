@@ -1,13 +1,11 @@
 import {
   createNestedPopulation,
   createTargetPolygon,
-  selectPopulationInterval,
+  selectPopulationCurve,
 } from "./geometry.js";
 
 const canvas = document.querySelector("#peano-canvas");
-const overlayCanvas = document.querySelector("#overlay-canvas");
 const context = canvas.getContext("2d", { alpha: false });
-const overlayContext = overlayCanvas.getContext("2d");
 const wrap = canvas.parentElement;
 const startInput = document.querySelector("#interval-start");
 const endInput = document.querySelector("#interval-end");
@@ -21,12 +19,10 @@ const target = createTargetPolygon();
 const populationCache = new Map();
 
 const state = {
-  start: 0.333,
-  end: 0.667,
+  start: 0,
+  end: 1,
   resolutionIndex: 4,
   queued: false,
-  staticLayer: null,
-  staticKey: "",
 };
 
 function resolution() {
@@ -41,7 +37,11 @@ function population() {
     populationCache.set(value, cached);
     return cached;
   }
-  const created = createNestedPopulation({ target, resolution: value });
+  const created = createNestedPopulation({
+    target,
+    resolution: value,
+    includeHullIndex: false,
+  });
   if (populationCache.size >= 2) populationCache.delete(populationCache.keys().next().value);
   populationCache.set(value, created);
   return created;
@@ -56,29 +56,65 @@ function canvasPoint(point, size) {
   };
 }
 
-function tracePolygon(targetContext, polygon, size) {
-  if (polygon.length < 3) return;
-  targetContext.beginPath();
+function tracePolygon(polygon, size) {
+  context.beginPath();
   polygon.forEach((point, index) => {
     const position = canvasPoint(point, size);
-    if (index === 0) targetContext.moveTo(position.x, position.y);
-    else targetContext.lineTo(position.x, position.y);
+    if (index === 0) context.moveTo(position.x, position.y);
+    else context.lineTo(position.x, position.y);
   });
-  targetContext.closePath();
+  context.closePath();
 }
 
-function drawPolygon(targetContext, polygon, size, fill, stroke = null, lineWidth = 1) {
-  if (polygon.length < 3) return;
-  tracePolygon(targetContext, polygon, size);
-  if (fill) {
-    targetContext.fillStyle = fill;
-    targetContext.fill();
+function strokeCurveRange(points, first, last, size, stroke, lineWidth) {
+  if (last <= first) return;
+  context.beginPath();
+  for (let index = first; index <= last; index += 1) {
+    const position = canvasPoint(points[index], size);
+    if (index === first) context.moveTo(position.x, position.y);
+    else context.lineTo(position.x, position.y);
   }
-  if (stroke) {
-    targetContext.strokeStyle = stroke;
-    targetContext.lineWidth = lineWidth;
-    targetContext.stroke();
+  context.strokeStyle = stroke;
+  context.lineWidth = lineWidth;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.stroke();
+}
+
+function curveColor(progress) {
+  const blue = [49, 86, 200];
+  const orange = [232, 73, 36];
+  const color = blue.map((value, index) => Math.round(
+    value + (orange[index] - value) * progress,
+  ));
+  return `rgba(${color.join(", ")}, 0.72)`;
+}
+
+function drawTimedCurve(points, size) {
+  const segmentCount = points.length - 1;
+  if (segmentCount < 1) return;
+  const chunkCount = Math.min(180, segmentCount);
+  const lineWidth = size < 440 ? 0.52 : 0.62;
+  for (let chunk = 0; chunk < chunkCount; chunk += 1) {
+    const first = Math.floor((chunk * segmentCount) / chunkCount);
+    const last = Math.max(first + 1, Math.floor(((chunk + 1) * segmentCount) / chunkCount));
+    strokeCurveRange(
+      points,
+      first,
+      Math.min(segmentCount, last),
+      size,
+      curveColor((chunk + 0.5) / chunkCount),
+      lineWidth,
+    );
   }
+}
+
+function drawPoint(point, size, color) {
+  const position = canvasPoint(point, size);
+  context.beginPath();
+  context.arc(position.x, position.y, 2.1, 0, Math.PI * 2);
+  context.fillStyle = color;
+  context.fill();
 }
 
 function resizeCanvas() {
@@ -86,141 +122,30 @@ function resizeCanvas() {
   const cssSize = Math.max(1, Math.round(Math.min(rect.width, rect.height)));
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const pixelSize = Math.round(cssSize * dpr);
-  let resized = false;
-
-  for (const currentCanvas of [canvas, overlayCanvas]) {
-    if (currentCanvas.width === pixelSize && currentCanvas.height === pixelSize) continue;
-    currentCanvas.width = pixelSize;
-    currentCanvas.height = pixelSize;
-    resized = true;
-  }
-
-  if (resized) {
+  if (canvas.width !== pixelSize || canvas.height !== pixelSize) {
+    canvas.width = pixelSize;
+    canvas.height = pixelSize;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    overlayContext.setTransform(dpr, 0, 0, dpr, 0, 0);
-    state.staticKey = "";
   }
-  return { cssSize, dpr };
-}
-
-function buildStaticLayer(currentPopulation, size, dpr) {
-  const layer = document.createElement("canvas");
-  layer.width = Math.round(size * dpr);
-  layer.height = Math.round(size * dpr);
-  const layerContext = layer.getContext("2d", { alpha: false });
-  layerContext.setTransform(dpr, 0, 0, dpr, 0, 0);
-  layerContext.fillStyle = "#ebe8e0";
-  layerContext.fillRect(0, 0, size, size);
-
-  drawPolygon(layerContext, target, size, "#dedbd2", "rgba(20, 20, 17, 0.66)", 1.05);
-  for (const parent of currentPopulation.parents) {
-    drawPolygon(
-      layerContext,
-      parent.body,
-      size,
-      null,
-      "rgba(20, 20, 17, 0.055)",
-      0.55,
-    );
-  }
-  return layer;
-}
-
-function mixedColor(progress, strength = 0.68) {
-  const paper = [235, 232, 224];
-  const blue = [65, 105, 225];
-  const orange = [255, 88, 50];
-  const ink = blue.map((value, index) => (
-    value + (orange[index] - value) * progress
-  ));
-  const color = paper.map((value, index) => Math.round(
-    value + (ink[index] - value) * strength,
-  ));
-  return `rgb(${color.join(", ")})`;
-}
-
-function drawOrderedBodies(selection, size) {
-  const currentPopulation = population();
-  const selectedCount = selection.last - selection.first + 1;
-  const sampleCount = Math.min(320, selectedCount);
-  for (let sample = 0; sample < sampleCount; sample += 1) {
-    const progress = sampleCount === 1 ? 0.5 : sample / (sampleCount - 1);
-    const index = selection.first + Math.round(progress * (selectedCount - 1));
-    drawPolygon(
-      overlayContext,
-      currentPopulation.atoms[index].body,
-      size,
-      mixedColor(progress),
-    );
-  }
-}
-
-function drawBodyContours(selection, size) {
-  const currentPopulation = population();
-  const selectedCount = selection.last - selection.first + 1;
-  const sampleCount = Math.min(22, selectedCount);
-  if (sampleCount < 3) return;
-
-  for (let sample = 1; sample + 1 < sampleCount; sample += 1) {
-    const progress = sample / (sampleCount - 1);
-    const index = selection.first + Math.round(progress * (selectedCount - 1));
-    const red = Math.round(65 + (255 - 65) * progress);
-    const green = Math.round(105 + (88 - 105) * progress);
-    const blue = Math.round(225 + (50 - 225) * progress);
-    drawPolygon(
-      overlayContext,
-      currentPopulation.atoms[index].body,
-      size,
-      null,
-      `rgba(${red}, ${green}, ${blue}, 0.18)`,
-      0.5,
-    );
-  }
-}
-
-function drawEndpoint(atom, size, color, fill) {
-  drawPolygon(overlayContext, atom.body, size, fill, color, 1.15);
-  const point = canvasPoint(atom.center, size);
-  overlayContext.beginPath();
-  overlayContext.arc(point.x, point.y, 2.25, 0, Math.PI * 2);
-  overlayContext.fillStyle = color;
-  overlayContext.fill();
+  return cssSize;
 }
 
 function draw() {
   state.queued = false;
-  const { cssSize: size, dpr } = resizeCanvas();
-  const currentPopulation = population();
-  const staticKey = `${resolution()}-${size}-${dpr}`;
-  if (state.staticKey !== staticKey) {
-    state.staticLayer = buildStaticLayer(currentPopulation, size, dpr);
-    state.staticKey = staticKey;
-  }
-  context.drawImage(state.staticLayer, 0, 0, size, size);
+  const size = resizeCanvas();
+  context.fillStyle = "#ebe8e0";
+  context.fillRect(0, 0, size, size);
 
-  const selection = selectPopulationInterval(currentPopulation, state.start, state.end);
-  const wash = context.createLinearGradient(size * 0.24, size * 0.76, size * 0.76, size * 0.24);
-  wash.addColorStop(0, "rgba(65, 105, 225, 0.10)");
-  wash.addColorStop(1, "rgba(255, 92, 53, 0.13)");
-  drawPolygon(context, selection.body, size, wash);
+  tracePolygon(target, size);
+  context.strokeStyle = "rgba(20, 20, 17, 0.11)";
+  context.lineWidth = 0.75;
+  context.stroke();
 
-  overlayContext.clearRect(0, 0, size, size);
-  drawOrderedBodies(selection, size);
-  drawPolygon(overlayContext, selection.body, size, null, "#151512", 1.25);
-  drawBodyContours(selection, size);
-  drawEndpoint(
-    selection.firstAtom,
-    size,
-    "#3156c8",
-    "rgba(65, 105, 225, 0.045)",
-  );
-  if (selection.last !== selection.first) {
-    drawEndpoint(
-      selection.lastAtom,
-      size,
-      "#e84924",
-      "rgba(255, 92, 53, 0.045)",
-    );
+  const selected = selectPopulationCurve(population(), state.start, state.end);
+  drawTimedCurve(selected, size);
+  if (selected.length) {
+    drawPoint(selected[0], size, "#3156c8");
+    drawPoint(selected.at(-1), size, "#e84924");
   }
 }
 
@@ -233,7 +158,7 @@ function scheduleDraw() {
 function updateControls() {
   const currentPopulation = population();
   intervalOutput.textContent = `[${state.start.toFixed(3)}, ${state.end.toFixed(3)}]`;
-  resolutionOutput.textContent = `${currentPopulation.atoms.length.toLocaleString("en-US")} bodies`;
+  resolutionOutput.textContent = `${currentPopulation.atoms.length.toLocaleString("en-US")} segments`;
   rangeFill.style.left = `${state.start * 100}%`;
   rangeFill.style.right = `${(1 - state.end) * 100}%`;
   resolutionInput.style.setProperty(
@@ -259,7 +184,6 @@ startInput.addEventListener("input", () => updateInterval(startInput));
 endInput.addEventListener("input", () => updateInterval(endInput));
 resolutionInput.addEventListener("input", () => {
   state.resolutionIndex = Number(resolutionInput.value);
-  state.staticKey = "";
   updateControls();
   scheduleDraw();
 });

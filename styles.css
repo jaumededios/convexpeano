@@ -62,16 +62,13 @@ a {
   border: 1px solid var(--line);
 }
 
-#peano-canvas,
-#overlay-canvas {
+#peano-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   display: block;
 }
-
-#overlay-canvas { pointer-events: none; }
 
 .controls {
   display: grid;

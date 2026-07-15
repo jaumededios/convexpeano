@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   createNestedPopulation,
+  createPopulationCurve,
   createTargetPolygon,
   intersectConvexPolygons,
   isConvexPolygon,
@@ -95,6 +96,24 @@ test("consecutive atoms overlap, allowing a continuous limiting traversal", () =
       ));
       assert.ok(overlap.length >= 3 || sharesPoint, `missing overlap at ${resolution}:${index}`);
     }
+  }
+});
+
+test("the polygonal curve joins body centers through consecutive convex unions", () => {
+  const population = createNestedPopulation({ target, resolution: 10 });
+  const curve = createPopulationCurve(population);
+  assert.equal(curve.length, population.atoms.length);
+  for (let index = 0; index < population.atoms.length; index += 1) {
+    assert.equal(pointInConvexPolygon(curve[index], population.atoms[index].body, 1e-7), true);
+    if (index + 1 === curve.length) continue;
+    const midpoint = {
+      x: (curve[index].x + curve[index + 1].x) / 2,
+      y: (curve[index].y + curve[index + 1].y) / 2,
+    };
+    assert.ok(
+      pointInConvexPolygon(midpoint, population.atoms[index].body, 1e-7)
+      || pointInConvexPolygon(midpoint, population.atoms[index + 1].body, 1e-7),
+    );
   }
 });
 
