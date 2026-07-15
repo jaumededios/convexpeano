@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="An interactive, real-time sketch inspired by Adam Paszkiewicz's convex Peano curve. Select any interval in [0,1] and watch its planar image grow."
+    />
+    <meta name="theme-color" content="#f0ecdf" />
+    <title>Convex Peano — Every interval becomes a body</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="wordmark" href="#top" aria-label="Convex Peano, back to top">
+        <span class="wordmark-mark">CP</span>
+        <span class="wordmark-name">Convex<br />Peano</span>
+      </a>
+      <div class="header-note">A computational sketch<br />after Paszkiewicz, 2024</div>
+      <a
+        class="paper-link"
+        href="https://arxiv.org/abs/2407.03016"
+        target="_blank"
+        rel="noreferrer"
+      >
+        Read the paper <span aria-hidden="true">↗</span>
+      </a>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="page-title">
+        <div class="eyebrow"><span>01</span> The impossible curve</div>
+        <h1 id="page-title">Every interval<br />becomes a <em>body.</em></h1>
+        <div class="hero-copy">
+          <p>
+            A continuous line fills a plane. Stranger still: choose <i>any</i> piece of
+            its domain and the image remains convex.
+          </p>
+          <p class="formula" aria-label="f maps the interval zero one onto T">
+            f : [0, 1] → T ⊂ ℝ²
+          </p>
+        </div>
+      </section>
+
+      <section class="instrument" aria-labelledby="instrument-title">
+        <div class="instrument-head">
+          <div>
+            <span class="section-index">02 / Instrument</span>
+            <h2 id="instrument-title">Select an interval. Watch it occupy space.</h2>
+          </div>
+          <div class="live-indicator"><span></span> Live</div>
+        </div>
+
+        <div class="instrument-grid">
+          <div class="canvas-panel">
+            <div class="canvas-toolbar" aria-hidden="true">
+              <span>Image plane T</span>
+              <span>Unit square / recursive approximation</span>
+            </div>
+            <div class="canvas-wrap">
+              <canvas id="peano-canvas" aria-label="Interactive convexified Peano curve visualization"></canvas>
+              <div class="canvas-legend" aria-hidden="true">
+                <span><i class="key key-image"></i> Selected image</span>
+                <span><i class="key key-hull"></i> Convex envelope</span>
+                <span><i class="key key-curve"></i> Full traversal</span>
+              </div>
+              <div class="axis-label axis-y">f(t)₂</div>
+              <div class="axis-label axis-x">f(t)₁</div>
+            </div>
+          </div>
+
+          <aside class="controls-panel" aria-label="Visualization controls">
+            <div class="control-section interval-section">
+              <div class="control-heading">
+                <label for="interval-start">Interval</label>
+                <output id="interval-output">[0.120, 0.680]</output>
+              </div>
+              <div class="dual-range" id="interval-range">
+                <div class="range-rail"></div>
+                <div class="range-fill" id="range-fill"></div>
+                <input
+                  id="interval-start"
+                  type="range"
+                  min="0"
+                  max="1000"
+                  value="120"
+                  step="1"
+                  aria-label="Interval start"
+                />
+                <input
+                  id="interval-end"
+                  type="range"
+                  min="0"
+                  max="1000"
+                  value="680"
+                  step="1"
+                  aria-label="Interval end"
+                />
+              </div>
+              <div class="range-labels"><span>0</span><span>1</span></div>
+              <div class="endpoint-readout">
+                <div><span class="dot dot-a"></span><small>Start</small><strong id="start-value">0.120</strong></div>
+                <div><span class="dot dot-b"></span><small>End</small><strong id="end-value">0.680</strong></div>
+                <div><small>Length</small><strong id="length-value">0.560</strong></div>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <div class="control-heading">
+                <label for="resolution">Resolution</label>
+                <output id="resolution-output">Level 7</output>
+              </div>
+              <input id="resolution" class="single-range" type="range" min="3" max="10" value="7" step="1" />
+              <div class="range-labels"><span>Coarse</span><span>1,048,576 cells</span></div>
+            </div>
+
+            <div class="stats-grid" aria-live="polite">
+              <div><small>Cells</small><strong id="cell-count">16,384</strong></div>
+              <div><small>Selected</small><strong id="selected-count">9,176</strong></div>
+              <div><small>Blocks</small><strong id="block-count">—</strong></div>
+              <div><small>Hull vertices</small><strong id="hull-count">—</strong></div>
+            </div>
+
+            <div class="control-actions">
+              <button id="animate-button" class="primary-action" type="button" aria-pressed="false">
+                <span class="play-icon" aria-hidden="true">▶</span>
+                <span class="button-label">Grow interval</span>
+              </button>
+              <button id="reset-button" class="secondary-action" type="button">Reset</button>
+            </div>
+
+            <p class="performance-note">
+              The interval is decomposed into maximal recursive cells. Work per frame grows with depth—not with the million-cell field.
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="explanation" aria-labelledby="explanation-title">
+        <div class="explanation-lead">
+          <span class="section-index">03 / What is happening?</span>
+          <h2 id="explanation-title">A finite shadow of an infinite construction.</h2>
+        </div>
+        <div class="explanation-grid">
+          <article>
+            <span class="article-number">A</span>
+            <h3>The traversal</h3>
+            <p>
+              A Hilbert-style recursion orders finer and finer square cells along [0,1].
+              Increasing the resolution reveals the familiar space-filling limit.
+            </p>
+          </article>
+          <article>
+            <span class="article-number">B</span>
+            <h3>The selected image</h3>
+            <p>
+              Your interval becomes a contiguous run of recursive cells. The orange area is that finite image; the blue boundary is its live convex envelope.
+            </p>
+          </article>
+          <article>
+            <span class="article-number">C</span>
+            <h3>The real monstrosity</h3>
+            <p>
+              Paszkiewicz constructs nested ordered populations of convex sets so every consecutive union is already convex—no envelope required.
+            </p>
+          </article>
+        </div>
+        <div class="disclaimer">
+          <span>Honest caveat</span>
+          <p>
+            This is an interactive analogy, not a numerical implementation of the paper’s proof. It swaps the proof’s “populations of souls” for a fast recursive traversal, then makes the convexity visible explicitly.
+          </p>
+        </div>
+      </section>
+
+      <section class="quote-section" aria-label="The central theorem">
+        <blockquote>
+          “There exists a continuous surjection f : [0,1] → T for which the image of any interval is a convex set.”
+        </blockquote>
+        <cite>— Adam Paszkiewicz, <a href="https://arxiv.org/abs/2407.03016">The Convex Peano Curve Does Exist</a></cite>
+      </section>
+    </main>
+
+    <footer>
+      <span>Convex Peano / 2024–∞</span>
+      <span>Built for curious dragging.</span>
+      <a href="#top">Back to top ↑</a>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
