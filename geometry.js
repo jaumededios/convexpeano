@@ -251,7 +251,7 @@ function localizedStation(inner, outer, tileSize, reverse = false) {
   return bodies;
 }
 
-function localizedNet(parent, axis, detail, overlap, tileSize) {
+function localizedNet(parent, axis, detail, overlap, tileSize, curvatureScale) {
   const bounds = polygonBounds(parent);
   const minimum = axisMinimum(bounds, axis);
   const maximum = axisMaximum(bounds, axis);
@@ -260,7 +260,7 @@ function localizedNet(parent, axis, detail, overlap, tileSize) {
     { length: detail },
     (_, index) => minimum + (span * index) / (detail - 1),
   );
-  const curvature = span * 0.52;
+  const curvature = span * curvatureScale;
   const coarse = skeleton.map((value) => parabolicPrefix(
     parent,
     axis,
@@ -279,9 +279,9 @@ function localizedNet(parent, axis, detail, overlap, tileSize) {
   return { bodies, coordinates };
 }
 
-function localizedAntiNet(parent, axis, detail, overlap, tileSize) {
+function localizedAntiNet(parent, axis, detail, overlap, tileSize, curvatureScale) {
   const reflected = reflectedPolygon(parent, axis);
-  const net = localizedNet(reflected, axis, detail, overlap, tileSize);
+  const net = localizedNet(reflected, axis, detail, overlap, tileSize, curvatureScale);
   return {
     bodies: net.bodies.map((body) => reflectedPolygon(body, axis)).reverse(),
     coordinates: net.coordinates.map((value) => -value).reverse(),
@@ -350,9 +350,16 @@ function makeSouls(entries) {
   });
 }
 
-function createOffspring(parent, axis, detail, overlap, tileSize) {
-  const net = localizedNet(parent.core, axis, detail, overlap, tileSize);
-  const antiNet = localizedAntiNet(parent.body, axis, detail, overlap, tileSize);
+function createOffspring(parent, axis, detail, overlap, tileSize, curvatureScale) {
+  const net = localizedNet(parent.core, axis, detail, overlap, tileSize, curvatureScale);
+  const antiNet = localizedAntiNet(
+    parent.body,
+    axis,
+    detail,
+    overlap,
+    tileSize,
+    curvatureScale,
+  );
   const aligned = alignNets(net, antiNet);
   const parentBounds = polygonBounds(parent.body);
   const axisSpan = Math.max(
@@ -404,13 +411,14 @@ function createOffspring(parent, axis, detail, overlap, tileSize) {
   return cells.flatMap((body) => [{ body }, { body }]);
 }
 
-function refinePopulation(parents, axis, detail, overlap, tileSize) {
+function refinePopulation(parents, axis, detail, overlap, tileSize, curvatureScale) {
   const groups = parents.map((parent) => createOffspring(
     parent,
     axis,
     detail,
     overlap,
     tileSize,
+    curvatureScale,
   ));
   const childCount = Math.max(...groups.map(({ length }) => length));
   const entries = [];
@@ -462,16 +470,36 @@ function queryHull(index, first, last) {
  * anti-ordering. The first generation is thin in x; its offspring are thin in
  * y while staying inside and covering their parents.
  */
-export function createNestedPopulation({ target, resolution }) {
+export function createNestedPopulation({
+  target,
+  resolution,
+  overlapScale = 2.2,
+  tileScale = 4,
+  curvatureScale = 0.52,
+}) {
   const bounds = polygonBounds(target);
   const span = Math.max(bounds.xMax - bounds.xMin, bounds.yMax - bounds.yMin);
   const step = span / Math.max(1, resolution - 1);
-  const overlap = Math.min(span * 0.5, step * 4.6);
-  const tileSize = span * 0.3;
+  const overlap = Math.min(span * 0.5, step * overlapScale);
+  const tileSize = Math.max(step * tileScale, span * 0.08);
   const root = { body: target, core: target, index: 0 };
-  const firstEntries = createOffspring(root, 0, resolution, overlap, tileSize);
+  const firstEntries = createOffspring(
+    root,
+    0,
+    resolution,
+    overlap,
+    tileSize,
+    curvatureScale,
+  );
   const parents = makeSouls(firstEntries);
-  const refinement = refinePopulation(parents, 1, resolution, overlap, tileSize);
+  const refinement = refinePopulation(
+    parents,
+    1,
+    resolution,
+    overlap,
+    tileSize,
+    curvatureScale,
+  );
   const atoms = refinement.children.map((atom) => ({
     ...atom,
     center: polygonCentroid(atom.body),

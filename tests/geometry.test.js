@@ -100,13 +100,13 @@ test("consecutive atoms overlap, allowing a continuous limiting traversal", () =
 
 test("the finest body diameter decreases as station resolution rises", () => {
   let previous = Infinity;
-  for (const resolution of [9, 11, 12, 13, 15, 18]) {
+  for (const resolution of [7, 8, 10, 14, 18, 22]) {
     const population = createNestedPopulation({ target, resolution });
     const diameter = maxPolygonDiameter(population.atoms.map(({ body }) => body));
     assert.ok(diameter < previous, `${diameter} did not shrink below ${previous}`);
     previous = diameter;
   }
-  assert.ok(previous < 0.7);
+  assert.ok(previous < 0.45);
 });
 
 test("sampled consecutive unions fill their convex envelope", () => {

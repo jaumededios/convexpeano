@@ -55,17 +55,23 @@ a {
 .visualization { width: 100%; }
 
 .canvas-wrap {
+  position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
   background: #ebe8e0;
   border: 1px solid var(--line);
 }
 
-#peano-canvas {
+#peano-canvas,
+#overlay-canvas {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;
 }
+
+#overlay-canvas { pointer-events: none; }
 
 .controls {
   display: grid;
@@ -107,7 +113,7 @@ a {
 }
 
 .rail { background: var(--line); }
-.range-fill { background: var(--accent); }
+.range-fill { background: linear-gradient(to right, var(--blue), var(--accent)); }
 
 .dual-range input {
   position: absolute;
@@ -150,6 +156,11 @@ a {
   outline: 2px solid var(--blue);
   outline-offset: 3px;
 }
+
+#interval-start::-webkit-slider-thumb { border-color: var(--blue); }
+#interval-end::-webkit-slider-thumb { border-color: var(--accent); }
+#interval-start::-moz-range-thumb { border-color: var(--blue); }
+#interval-end::-moz-range-thumb { border-color: var(--accent); }
 
 .single-range {
   width: 100%;
