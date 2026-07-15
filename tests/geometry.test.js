@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createNestedPopulation,
   createPopulationCurve,
+  createPopulationPortalCurve,
   createTargetPolygon,
   intersectConvexPolygons,
   isConvexPolygon,
@@ -11,6 +12,7 @@ import {
   pointInConvexPolygon,
   polygonArea,
   selectPopulationInterval,
+  supportStation,
 } from "../geometry.js";
 
 const target = createTargetPolygon(40);
@@ -70,6 +72,25 @@ test("coarse and fine station counts can be refined independently", () => {
   assert.ok(layered.atoms.length > layered.parents.length * 10);
 });
 
+test("support relaxation produces a nested convex station with exact endpoints", () => {
+  const inner = target.map((point) => ({
+    x: 0.5 + (point.x - 0.5) * 0.72,
+    y: 0.5 + (point.y - 0.5) * 0.72,
+  }));
+  const station = supportStation(inner, target, 0.025);
+  assert.ok(station.length > 2);
+  assert.ok(Math.abs(polygonArea(station[0]) - polygonArea(inner)) < 1e-10);
+  assert.ok(Math.abs(polygonArea(station.at(-1)) - polygonArea(target)) < 1e-10);
+  for (let index = 0; index < station.length; index += 1) {
+    assert.equal(isConvexPolygon(station[index]), true);
+    if (!index) continue;
+    assert.ok(polygonArea(station[index]) >= polygonArea(station[index - 1]) - 1e-10);
+    for (const point of station[index - 1]) {
+      assert.equal(pointInConvexPolygon(point, station[index], 1e-7), true);
+    }
+  }
+});
+
 test("every child stays in and collectively covers its parent", () => {
   const population = createNestedPopulation({ target, resolution: 11 });
   for (let parentIndex = 0; parentIndex < population.parents.length; parentIndex += 1) {
@@ -107,21 +128,31 @@ test("consecutive atoms overlap, allowing a continuous limiting traversal", () =
   }
 });
 
-test("the polygonal curve joins body centers through consecutive convex unions", () => {
+test("the legacy center path samples a point from every ordered atom", () => {
   const population = createNestedPopulation({ target, resolution: 10 });
   const curve = createPopulationCurve(population);
   assert.equal(curve.length, population.atoms.length);
   for (let index = 0; index < population.atoms.length; index += 1) {
     assert.equal(pointInConvexPolygon(curve[index], population.atoms[index].body, 1e-7), true);
-    if (index + 1 === curve.length) continue;
-    const midpoint = {
-      x: (curve[index].x + curve[index + 1].x) / 2,
-      y: (curve[index].y + curve[index + 1].y) / 2,
-    };
-    assert.ok(
-      pointInConvexPolygon(midpoint, population.atoms[index].body, 1e-7)
-      || pointInConvexPolygon(midpoint, population.atoms[index + 1].body, 1e-7),
-    );
+  }
+});
+
+test("the portal approximant keeps every segment inside its assigned atom", () => {
+  const population = createNestedPopulation({ target, resolution: 8 });
+  const curve = createPopulationPortalCurve(population);
+  assert.equal(curve.length, population.atoms.length + 1);
+  for (let index = 0; index < population.atoms.length; index += 1) {
+    for (const amount of [0, 0.25, 0.5, 0.75, 1]) {
+      const point = {
+        x: curve[index].x + (curve[index + 1].x - curve[index].x) * amount,
+        y: curve[index].y + (curve[index + 1].y - curve[index].y) * amount,
+      };
+      assert.equal(
+        pointInConvexPolygon(point, population.atoms[index].body, 1e-7),
+        true,
+        `portal segment ${index} left its atom`,
+      );
+    }
   }
 });
 

@@ -251,7 +251,145 @@ function localizedStation(inner, outer, tileSize, reverse = false) {
   return bodies;
 }
 
-function localizedNet(parent, axis, detail, overlap, tileSize, curvatureScale) {
+/**
+ * Polygon-specialized station. Successive convex hulls expose the disturbance
+ * in boundary order, so the chain is nested, convex, and ends exactly at outer.
+ */
+export function boundaryStation(inner, outer, pointSpacing, reverse = false) {
+  if (polygonsNearlyEqual(inner, outer)) return [inner, outer];
+  let sampledBoundary = [];
+  for (let index = 0; index < outer.length; index += 1) {
+    const start = outer[index];
+    const end = outer[(index + 1) % outer.length];
+    const length = Math.hypot(end.x - start.x, end.y - start.y);
+    const pieces = Math.max(1, Math.ceil(length / pointSpacing));
+    for (let piece = 0; piece < pieces; piece += 1) {
+      const amount = piece / pieces;
+      const point = {
+        x: start.x + (end.x - start.x) * amount,
+        y: start.y + (end.y - start.y) * amount,
+      };
+      sampledBoundary.push({
+        point,
+        outside: !pointInConvexPolygon(point, inner, 1e-8),
+      });
+    }
+  }
+  if (reverse) sampledBoundary = sampledBoundary.reverse();
+  const runStart = sampledBoundary.findIndex(({ outside }, index) => (
+    outside && !sampledBoundary[(index + sampledBoundary.length - 1) % sampledBoundary.length].outside
+  ));
+  if (runStart > 0) {
+    sampledBoundary = sampledBoundary.slice(runStart).concat(sampledBoundary.slice(0, runStart));
+  }
+  const boundary = sampledBoundary.filter(({ outside }) => outside).map(({ point }) => point);
+
+  const bodies = [inner];
+  let current = inner;
+  for (const point of boundary) {
+    const next = convexHull(current.concat(point));
+    if (Math.abs(polygonArea(next) - polygonArea(current)) < EPSILON) continue;
+    current = next;
+    bodies.push(current);
+  }
+  if (!polygonsNearlyEqual(bodies.at(-1), outer, 1e-8)) bodies.push(outer);
+  else bodies[bodies.length - 1] = outer;
+  return bodies;
+}
+
+function clipConvexHalfPlane(subject, normal, support) {
+  const output = [];
+  const side = (point) => support - normal.x * point.x - normal.y * point.y;
+  for (let index = 0; index < subject.length; index += 1) {
+    const current = subject[index];
+    const previous = subject[(index + subject.length - 1) % subject.length];
+    const currentSide = side(current);
+    const previousSide = side(previous);
+    const currentInside = currentSide >= -EPSILON;
+    const previousInside = previousSide >= -EPSILON;
+    if (currentInside !== previousInside) {
+      const denominator = previousSide - currentSide;
+      const amount = Math.abs(denominator) < EPSILON ? 0 : previousSide / denominator;
+      output.push({
+        x: previous.x + (current.x - previous.x) * amount,
+        y: previous.y + (current.y - previous.y) * amount,
+      });
+    }
+    if (currentInside) output.push(current);
+  }
+  return output.length >= 3 ? convexHull(output) : output;
+}
+
+/**
+ * Expand inner by relaxing its supporting half-planes toward outer. Moving one
+ * support at a time creates a convex station whose increments become local as
+ * the relaxation step shrinks.
+ */
+export function supportStation(inner, outer, pointSpacing, reverse = false) {
+  if (polygonsNearlyEqual(inner, outer)) return [inner, outer];
+  let constraints = inner.map((start, index) => {
+    const end = inner[(index + 1) % inner.length];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const length = Math.hypot(dx, dy);
+    if (length < EPSILON) return null;
+    const normal = { x: dy / length, y: -dx / length };
+    const initial = normal.x * start.x + normal.y * start.y;
+    const final = Math.max(...outer.map((point) => (
+      normal.x * point.x + normal.y * point.y
+    )));
+    return { normal, initial, final };
+  }).filter((constraint) => (
+    constraint && constraint.final - constraint.initial > EPSILON
+  ));
+  if (reverse) constraints = constraints.reverse();
+  if (!constraints.length) return [inner, outer];
+
+  const maximumTravel = Math.max(...constraints.map(({ initial, final }) => final - initial));
+  const passCount = Math.max(1, Math.ceil(maximumTravel / Math.max(pointSpacing * 0.35, EPSILON)));
+  const supports = constraints.map(({ initial }) => initial);
+  const constrainedBody = () => {
+    let body = outer;
+    for (let index = 0; index < constraints.length; index += 1) {
+      body = clipConvexHalfPlane(body, constraints[index].normal, supports[index]);
+      if (body.length < 3) break;
+    }
+    return body;
+  };
+
+  const bodies = [inner];
+  let current = inner;
+  for (let pass = 1; pass <= passCount; pass += 1) {
+    for (let index = 0; index < constraints.length; index += 1) {
+      const { initial, final } = constraints[index];
+      supports[index] = initial + ((final - initial) * pass) / passCount;
+      const next = constrainedBody();
+      if (next.length < 3 || Math.abs(polygonArea(next) - polygonArea(current)) < EPSILON) continue;
+      current = next;
+      bodies.push(current);
+    }
+  }
+  if (!polygonsNearlyEqual(bodies.at(-1), outer, 1e-8)) bodies.push(outer);
+  else bodies[bodies.length - 1] = outer;
+  return bodies;
+}
+
+function createStation(inner, outer, tileSize, reverse, stationMode) {
+  if (stationMode === "boundary") return boundaryStation(inner, outer, tileSize, reverse);
+  if (stationMode === "support") return supportStation(inner, outer, tileSize, reverse);
+  return localizedStation(inner, outer, tileSize, reverse);
+}
+
+function localizedNet(
+  parent,
+  axis,
+  detail,
+  overlap,
+  tileSize,
+  curvatureScale,
+  stationMode,
+  capSamples,
+) {
   const bounds = polygonBounds(parent);
   const minimum = axisMinimum(bounds, axis);
   const maximum = axisMaximum(bounds, axis);
@@ -266,6 +404,7 @@ function localizedNet(parent, axis, detail, overlap, tileSize, curvatureScale) {
     axis,
     value + overlap,
     curvature,
+    capSamples,
   ));
   const firstValid = coarse.find((body) => body.length >= 3 && polygonArea(body) > EPSILON)
     || parent;
@@ -278,16 +417,40 @@ function localizedNet(parent, axis, detail, overlap, tileSize, curvatureScale) {
   const bodies = [coarse[0]];
   const coordinates = [skeleton[0]];
   for (let index = 0; index + 1 < coarse.length; index += 1) {
-    const station = localizedStation(coarse[index], coarse[index + 1], tileSize);
+    const station = createStation(
+      coarse[index],
+      coarse[index + 1],
+      tileSize,
+      false,
+      stationMode,
+    );
     bodies.push(...station.slice(1));
     coordinates.push(...Array(station.length - 1).fill(skeleton[index]));
   }
   return { bodies, coordinates };
 }
 
-function localizedAntiNet(parent, axis, detail, overlap, tileSize, curvatureScale) {
+function localizedAntiNet(
+  parent,
+  axis,
+  detail,
+  overlap,
+  tileSize,
+  curvatureScale,
+  stationMode,
+  capSamples,
+) {
   const reflected = reflectedPolygon(parent, axis);
-  const net = localizedNet(reflected, axis, detail, overlap, tileSize, curvatureScale);
+  const net = localizedNet(
+    reflected,
+    axis,
+    detail,
+    overlap,
+    tileSize,
+    curvatureScale,
+    stationMode,
+    capSamples,
+  );
   return {
     bodies: net.bodies.map((body) => reflectedPolygon(body, axis)).reverse(),
     coordinates: net.coordinates.map((value) => -value).reverse(),
@@ -366,8 +529,19 @@ function createOffspring(
   overlap,
   tileSize,
   curvatureScale,
+  stationMode,
+  capSamples,
 ) {
-  const net = localizedNet(parent.core, axis, detail, overlap, tileSize, curvatureScale);
+  const net = localizedNet(
+    parent.core,
+    axis,
+    detail,
+    overlap,
+    tileSize,
+    curvatureScale,
+    stationMode,
+    capSamples,
+  );
   const antiNet = localizedAntiNet(
     parent.body,
     axis,
@@ -375,6 +549,8 @@ function createOffspring(
     overlap,
     tileSize,
     curvatureScale,
+    stationMode,
+    capSamples,
   );
   const aligned = alignNets(net, antiNet);
   const parentBounds = polygonBounds(parent.body);
@@ -392,7 +568,13 @@ function createOffspring(
     stationBodies = [parent.core];
     insertion = Math.floor(aligned.leftBodies.length / 2);
   } else {
-    stationBodies = localizedStation(parent.core, parent.body, tileSize, axis === 1);
+    stationBodies = createStation(
+      parent.core,
+      parent.body,
+      tileSize,
+      axis === 1,
+      stationMode,
+    );
     const center = disturbanceVertices.reduce(
       (sum, point) => sum + (axis === 0 ? point.x : point.y) / disturbanceVertices.length,
       0,
@@ -433,7 +615,11 @@ function refinePopulation(
   detail,
   overlapScale,
   tileScale,
+  minimumTileScale,
   curvatureScale,
+  uniformBranching,
+  stationMode,
+  capSamples,
 ) {
   const groups = parents.map((parent) => {
     const bounds = polygonBounds(parent.body);
@@ -448,7 +634,7 @@ function refinePopulation(
     );
     const tileSize = Math.max(
       (span / Math.max(1, detail - 1)) * tileScale,
-      span * 0.08,
+      span * minimumTileScale,
     );
     return createOffspring(
       parent,
@@ -457,16 +643,26 @@ function refinePopulation(
       overlap,
       tileSize,
       curvatureScale,
+      stationMode,
+      capSamples,
     );
   });
   const childCount = Math.max(...groups.map(({ length }) => length));
   const entries = [];
+  const parentRanges = [];
   groups.forEach((group, parentIndex) => {
-    const stretched = stretchSequence(group, childCount);
-    const ordered = parentIndex % 2 === 0 ? stretched : [...stretched].reverse();
+    const children = uniformBranching ? stretchSequence(group, childCount) : group;
+    const ordered = parentIndex % 2 === 0 ? children : [...children].reverse();
+    const first = entries.length;
     ordered.forEach(({ body }) => entries.push({ body, parentIndex }));
+    parentRanges.push({ first, last: entries.length - 1 });
   });
-  return { children: makeSouls(entries), childCount };
+  return {
+    children: makeSouls(entries),
+    childCount: uniformBranching ? childCount : null,
+    childCounts: groups.map(({ length }) => length),
+    parentRanges,
+  };
 }
 
 function polygonCentroid(polygon) {
@@ -513,16 +709,21 @@ export function createNestedPopulation({
   target,
   resolution,
   coarseResolution = resolution,
+  refinementDetails = [resolution],
+  uniformBranching = true,
+  stationMode = "grid",
   overlapScale = 2.2,
   tileScale = 4,
+  minimumTileScale = 0.08,
   curvatureScale = 0.52,
+  capSamples = 10,
   includeHullIndex = true,
 }) {
   const bounds = polygonBounds(target);
   const span = Math.max(bounds.xMax - bounds.xMin, bounds.yMax - bounds.yMin);
   const step = span / Math.max(1, coarseResolution - 1);
   const overlap = Math.min(span * 0.5, step * overlapScale);
-  const tileSize = Math.max(step * tileScale, span * 0.08);
+  const tileSize = Math.max(step * tileScale, span * minimumTileScale);
   const root = { body: target, core: target, index: 0 };
   const firstEntries = createOffspring(
     root,
@@ -531,17 +732,33 @@ export function createNestedPopulation({
     overlap,
     tileSize,
     curvatureScale,
+    stationMode,
+    capSamples,
   );
   const parents = makeSouls(firstEntries);
-  const refinement = refinePopulation(
-    parents,
-    1,
-    resolution,
-    overlapScale,
-    tileScale,
-    curvatureScale,
-  );
-  const atoms = refinement.children.map((atom) => ({
+  const levels = [parents];
+  const levelRanges = [];
+  let current = parents;
+  let branchCount = uniformBranching ? 1 : null;
+  refinementDetails.forEach((detail, index) => {
+    const refinement = refinePopulation(
+      current,
+      (index + 1) % 2,
+      detail,
+      overlapScale,
+      tileScale,
+      minimumTileScale,
+      curvatureScale,
+      uniformBranching,
+      stationMode,
+      capSamples,
+    );
+    current = refinement.children;
+    if (uniformBranching) branchCount *= refinement.childCount;
+    levels.push(current);
+    levelRanges.push(refinement.parentRanges);
+  });
+  const atoms = current.map((atom) => ({
     ...atom,
     center: polygonCentroid(atom.body),
   }));
@@ -550,9 +767,10 @@ export function createNestedPopulation({
     target,
     resolution,
     coarseResolution,
-    branchCount: refinement.childCount,
+    branchCount,
     parents,
-    levels: [parents, atoms],
+    levels: [...levels.slice(0, -1), atoms],
+    levelRanges,
     atoms,
     hullIndex: includeHullIndex ? buildHullIndex(atoms.map(({ body }) => body)) : null,
   };
@@ -577,8 +795,8 @@ export function selectPopulationInterval(population, start, end) {
 }
 
 /**
- * A continuous polygonal approximant through the centers of the ordered
- * bodies. Each edge stays in the convex union of its two consecutive bodies.
+ * Legacy visual heuristic through cell centers. Unlike the portal path below,
+ * its edges are not certified to stay inside their assigned bodies.
  */
 export function createPopulationCurve(population) {
   if (population.curve) return population.curve;
@@ -587,6 +805,29 @@ export function createPopulationCurve(population) {
   const curve = atoms.map((atom) => atom.center || polygonCentroid(atom.body));
   population.curve = curve;
   return curve;
+}
+
+/**
+ * A certified finite-stage path. Segment i lies inside atom i because its
+ * endpoints are chosen from the overlaps with the preceding/following atoms.
+ * This is still only an approximant: the area-filling image appears through
+ * recursive refinement below each atom.
+ */
+export function createPopulationPortalCurve(population) {
+  const { atoms } = population;
+  if (!atoms.length) return [];
+  if (atoms.length === 1) return [polygonCentroid(atoms[0].body)];
+
+  const points = [polygonCentroid(atoms[0].body)];
+  for (let index = 0; index + 1 < atoms.length; index += 1) {
+    const overlap = intersectConvexPolygons(atoms[index].body, atoms[index + 1].body);
+    if (!overlap.length) {
+      throw new Error(`Consecutive atoms ${index} and ${index + 1} do not overlap`);
+    }
+    points.push(polygonCentroid(overlap));
+  }
+  points.push(polygonCentroid(atoms.at(-1).body));
+  return points;
 }
 
 export function selectPopulationCurve(population, start, end) {

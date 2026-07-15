@@ -41,7 +41,7 @@ jobs:
       - name: Assemble static site
         run: |
           mkdir _site
-          cp index.html styles.css app.js geometry.js _site/
+          cp index.html styles.css app.js geometry.js lab.html lab.css lab.js _site/
           touch _site/.nojekyll
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f2ec" />
+    <meta name="description" content="A visual mathematics lab for a convex Peano curve construction." />
+    <title>Convex Peano · math lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400&family=Manrope:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./lab.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <a class="back" href="./">← curve</a>
+        <div>
+          <h1>Convex Peano <span>· math lab</span></h1>
+          <p>Finite bodies before the limit.</p>
+        </div>
+      </header>
+
+      <nav class="modes" aria-label="Experiment">
+        <button type="button" data-mode="station" aria-selected="true">Support station</button>
+        <button type="button" data-mode="population" aria-selected="false">Population</button>
+        <button type="button" data-mode="portal" aria-selected="false">Portal path</button>
+      </nav>
+
+      <section class="experiment" aria-label="Convex construction experiment">
+        <div class="canvas-wrap">
+          <canvas id="lab-canvas" aria-label="Geometric construction diagram"></canvas>
+          <div class="legend" id="legend" aria-hidden="true"></div>
+        </div>
+
+        <dl class="diagnostics" id="diagnostics" aria-live="polite"></dl>
+
+        <div class="control-panels">
+          <div class="control-panel" data-panel="station">
+            <div class="control">
+              <div class="control-label">
+                <label for="station-step">Station step</label>
+                <output id="station-step-output"></output>
+              </div>
+              <input id="station-step" type="range" min="0" max="1000" value="570" step="1" />
+            </div>
+            <div class="control">
+              <div class="control-label">
+                <label for="station-precision">Relaxation</label>
+                <output id="station-precision-output"></output>
+              </div>
+              <input id="station-precision" type="range" min="0" max="4" value="2" step="1" />
+            </div>
+          </div>
+
+          <div class="control-panel" data-panel="population" hidden>
+            <div class="control">
+              <div class="control-label">
+                <label for="generation">Generation</label>
+                <output id="generation-output"></output>
+              </div>
+              <input id="generation" type="range" min="0" max="1" value="1" step="1" />
+            </div>
+            <div class="control" id="parent-control">
+              <div class="control-label">
+                <label for="parent">Parent</label>
+                <output id="parent-output"></output>
+              </div>
+              <input id="parent" type="range" min="0" max="41" value="20" step="1" />
+            </div>
+          </div>
+
+          <div class="control-panel" data-panel="portal" hidden>
+            <div class="control control-wide">
+              <div class="control-label">
+                <label for="portal-start">Interval</label>
+                <output id="portal-output"></output>
+              </div>
+              <div class="dual-range">
+                <div class="rail"></div>
+                <div class="range-fill" id="portal-fill"></div>
+                <input id="portal-start" type="range" min="0" max="1000" value="180" step="1" aria-label="Interval start" />
+                <input id="portal-end" type="range" min="0" max="1000" value="720" step="1" aria-label="Interval end" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a href="https://arxiv.org/abs/2407.03016" target="_blank" rel="noreferrer">Paszkiewicz · 2407.03016</a>
+      <span>Codex &amp; Jaume</span>
+    </footer>
+    <script type="module" src="./lab.js"></script>
+  </body>
+</html>
