@@ -1,5 +1,5 @@
 import {
-  createPopulation,
+  createNestedPopulation,
   createTargetPolygon,
   selectPopulationInterval,
 } from "./geometry.js";
@@ -14,21 +14,33 @@ const intervalOutput = document.querySelector("#interval-output");
 const resolutionOutput = document.querySelector("#resolution-output");
 const rangeFill = document.querySelector("#range-fill");
 
+const RESOLUTIONS = [9, 11, 12, 13, 15, 18];
+const target = createTargetPolygon();
+const populationCache = new Map();
+
 const state = {
   start: 0.12,
   end: 0.68,
-  level: 5,
+  resolutionIndex: 2,
   queued: false,
+  staticLayer: null,
+  staticKey: "",
 };
 
-const target = createTargetPolygon();
+function resolution() {
+  return RESOLUTIONS[state.resolutionIndex];
+}
 
-function sliceCount() {
-  return 2 ** state.level;
+function population() {
+  const value = resolution();
+  if (!populationCache.has(value)) {
+    populationCache.set(value, createNestedPopulation({ target, resolution: value }));
+  }
+  return populationCache.get(value);
 }
 
 function canvasPoint(point, size) {
-  const padding = Math.max(28, size * 0.075);
+  const padding = Math.max(28, size * 0.067);
   const plotSize = size - padding * 2;
   return {
     x: padding + point.x * plotSize,
@@ -36,27 +48,28 @@ function canvasPoint(point, size) {
   };
 }
 
-function tracePolygon(polygon, size) {
-  context.beginPath();
+function tracePolygon(targetContext, polygon, size) {
+  if (polygon.length < 3) return;
+  targetContext.beginPath();
   polygon.forEach((point, index) => {
     const position = canvasPoint(point, size);
-    if (index === 0) context.moveTo(position.x, position.y);
-    else context.lineTo(position.x, position.y);
+    if (index === 0) targetContext.moveTo(position.x, position.y);
+    else targetContext.lineTo(position.x, position.y);
   });
-  context.closePath();
+  targetContext.closePath();
 }
 
-function drawPolygon(polygon, size, fill, stroke = null, lineWidth = 1) {
+function drawPolygon(targetContext, polygon, size, fill, stroke = null, lineWidth = 1) {
   if (polygon.length < 3) return;
-  tracePolygon(polygon, size);
+  tracePolygon(targetContext, polygon, size);
   if (fill) {
-    context.fillStyle = fill;
-    context.fill();
+    targetContext.fillStyle = fill;
+    targetContext.fill();
   }
   if (stroke) {
-    context.strokeStyle = stroke;
-    context.lineWidth = lineWidth;
-    context.stroke();
+    targetContext.strokeStyle = stroke;
+    targetContext.lineWidth = lineWidth;
+    targetContext.stroke();
   }
 }
 
@@ -69,43 +82,75 @@ function resizeCanvas() {
     canvas.width = pixelSize;
     canvas.height = pixelSize;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    state.staticKey = "";
   }
-  return cssSize;
+  return { cssSize, dpr };
+}
+
+function buildStaticLayer(currentPopulation, size, dpr) {
+  const layer = document.createElement("canvas");
+  layer.width = Math.round(size * dpr);
+  layer.height = Math.round(size * dpr);
+  const layerContext = layer.getContext("2d", { alpha: false });
+  layerContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+  layerContext.fillStyle = "#ebe8e0";
+  layerContext.fillRect(0, 0, size, size);
+
+  drawPolygon(layerContext, target, size, "#dedbd2", "rgba(20, 20, 17, 0.70)", 1.05);
+
+  for (const parent of currentPopulation.parents) {
+    drawPolygon(
+      layerContext,
+      parent.body,
+      size,
+      null,
+      "rgba(20, 20, 17, 0.045)",
+      0.46,
+    );
+  }
+
+  const atomOpacity = currentPopulation.atoms.length > 8000 ? 0.017 : 0.024;
+  const atomWidth = currentPopulation.atoms.length > 8000 ? 0.34 : 0.42;
+  for (const atom of currentPopulation.atoms) {
+    drawPolygon(
+      layerContext,
+      atom.body,
+      size,
+      null,
+      `rgba(20, 20, 17, ${atomOpacity})`,
+      atomWidth,
+    );
+  }
+
+  return layer;
 }
 
 function draw() {
   state.queued = false;
-  const size = resizeCanvas();
-  context.fillStyle = "#ebe8e0";
-  context.fillRect(0, 0, size, size);
-
-  const population = createPopulation({ target, sliceCount: sliceCount() });
-  const selection = selectPopulationInterval(population, state.start, state.end);
-
-  drawPolygon(target, size, "#ddd9cf", "rgba(21, 21, 18, 0.72)", 1.1);
-
-  // The population itself: overlapping convex bodies, drawn as quiet ribs.
-  context.save();
-  for (const slice of population.slices) {
-    drawPolygon(slice.body, size, "rgba(244, 242, 236, 0.055)", "rgba(21, 21, 18, 0.095)", 0.65);
+  const { cssSize: size, dpr } = resizeCanvas();
+  const currentPopulation = population();
+  const staticKey = `${resolution()}-${size}-${dpr}`;
+  if (state.staticKey !== staticKey) {
+    state.staticLayer = buildStaticLayer(currentPopulation, size, dpr);
+    state.staticKey = staticKey;
   }
-  context.restore();
+  context.drawImage(state.staticLayer, 0, 0, size, size);
 
-  // This polygon is the consecutive union itself: A_last ∩ B_first.
-  drawPolygon(selection.body, size, "rgba(255, 92, 53, 0.86)", "#151512", 1.15);
+  const selection = selectPopulationInterval(currentPopulation, state.start, state.end);
+  const gradient = context.createLinearGradient(size * 0.18, size * 0.82, size * 0.82, size * 0.18);
+  gradient.addColorStop(0, "rgba(255, 74, 40, 0.90)");
+  gradient.addColorStop(1, "rgba(255, 111, 59, 0.88)");
+  drawPolygon(context, selection.body, size, gradient, "#151512", 1.15);
 
-  // Retain the individual bodies inside the selected run so its construction is visible.
-  context.save();
-  for (let index = selection.firstSlice; index <= selection.lastSlice; index += 1) {
-    drawPolygon(population.slices[index].body, size, null, "rgba(21, 21, 18, 0.16)", 0.65);
-  }
-  context.restore();
-
-  const apex = canvasPoint(population.apex, size);
-  context.beginPath();
-  context.arc(apex.x, apex.y, 3.2, 0, Math.PI * 2);
-  context.fillStyle = "#151512";
-  context.fill();
+  const drawEndpoint = (atom) => {
+    const point = canvasPoint(atom.center, size);
+    context.beginPath();
+    context.arc(point.x, point.y, 2.15, 0, Math.PI * 2);
+    context.fillStyle = "#151512";
+    context.fill();
+  };
+  drawEndpoint(selection.firstAtom);
+  if (selection.last !== selection.first) drawEndpoint(selection.lastAtom);
 }
 
 function scheduleDraw() {
@@ -115,12 +160,15 @@ function scheduleDraw() {
 }
 
 function updateControls() {
-  const count = sliceCount();
+  const currentPopulation = population();
   intervalOutput.textContent = `[${state.start.toFixed(3)}, ${state.end.toFixed(3)}]`;
-  resolutionOutput.textContent = `${count} bodies`;
+  resolutionOutput.textContent = `${currentPopulation.atoms.length.toLocaleString("en-US")} bodies`;
   rangeFill.style.left = `${state.start * 100}%`;
   rangeFill.style.right = `${(1 - state.end) * 100}%`;
-  resolutionInput.style.setProperty("--progress", `${((state.level - 3) / 5) * 100}%`);
+  resolutionInput.style.setProperty(
+    "--progress",
+    `${(state.resolutionIndex / (RESOLUTIONS.length - 1)) * 100}%`,
+  );
   startInput.style.zIndex = state.start > 0.85 ? "3" : "2";
   endInput.style.zIndex = "1";
 }
@@ -139,7 +187,8 @@ function updateInterval(changedInput) {
 startInput.addEventListener("input", () => updateInterval(startInput));
 endInput.addEventListener("input", () => updateInterval(endInput));
 resolutionInput.addEventListener("input", () => {
-  state.level = Number(resolutionInput.value);
+  state.resolutionIndex = Number(resolutionInput.value);
+  state.staticKey = "";
   updateControls();
   scheduleDraw();
 });
