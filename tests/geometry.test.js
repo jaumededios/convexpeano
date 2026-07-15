@@ -62,6 +62,14 @@ test("every body and rendered interval is convex", () => {
   }
 });
 
+test("coarse and fine station counts can be refined independently", () => {
+  const coupled = createNestedPopulation({ target, resolution: 10 });
+  const layered = createNestedPopulation({ target, resolution: 10, coarseResolution: 4 });
+  assert.equal(layered.coarseResolution, 4);
+  assert.ok(layered.parents.length < coupled.parents.length);
+  assert.ok(layered.atoms.length > layered.parents.length * 10);
+});
+
 test("every child stays in and collectively covers its parent", () => {
   const population = createNestedPopulation({ target, resolution: 11 });
   for (let parentIndex = 0; parentIndex < population.parents.length; parentIndex += 1) {

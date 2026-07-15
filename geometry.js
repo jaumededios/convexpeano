@@ -512,6 +512,7 @@ function queryHull(index, first, last) {
 export function createNestedPopulation({
   target,
   resolution,
+  coarseResolution = resolution,
   overlapScale = 2.2,
   tileScale = 4,
   curvatureScale = 0.52,
@@ -519,14 +520,14 @@ export function createNestedPopulation({
 }) {
   const bounds = polygonBounds(target);
   const span = Math.max(bounds.xMax - bounds.xMin, bounds.yMax - bounds.yMin);
-  const step = span / Math.max(1, resolution - 1);
+  const step = span / Math.max(1, coarseResolution - 1);
   const overlap = Math.min(span * 0.5, step * overlapScale);
   const tileSize = Math.max(step * tileScale, span * 0.08);
   const root = { body: target, core: target, index: 0 };
   const firstEntries = createOffspring(
     root,
     0,
-    resolution,
+    coarseResolution,
     overlap,
     tileSize,
     curvatureScale,
@@ -548,6 +549,7 @@ export function createNestedPopulation({
   return {
     target,
     resolution,
+    coarseResolution,
     branchCount: refinement.childCount,
     parents,
     levels: [parents, atoms],

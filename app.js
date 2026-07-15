@@ -15,6 +15,7 @@ const resolutionOutput = document.querySelector("#resolution-output");
 const rangeFill = document.querySelector("#range-fill");
 
 const RESOLUTIONS = [7, 8, 10, 14, 18, 22];
+const COARSE_RESOLUTIONS = [4, 4, 5, 5, 6, 7];
 const target = createTargetPolygon();
 const populationCache = new Map();
 
@@ -40,6 +41,7 @@ function population() {
   const created = createNestedPopulation({
     target,
     resolution: value,
+    coarseResolution: COARSE_RESOLUTIONS[state.resolutionIndex],
     includeHullIndex: false,
   });
   if (populationCache.size >= 2) populationCache.delete(populationCache.keys().next().value);
